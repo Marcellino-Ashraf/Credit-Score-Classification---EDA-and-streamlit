@@ -1,2 +1,6 @@
 .env
 source files
+Cleaning notes.txt
+.vscode
+__pycache__/
+_build.ipynb

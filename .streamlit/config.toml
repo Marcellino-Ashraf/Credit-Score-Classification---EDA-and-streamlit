@@ -1,0 +1,12 @@
+# Light teal theme (the app is light-only)
+
+[theme]
+base = "light"
+primaryColor = "#0E7490"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8FAFC"
+textColor = "#0F172A"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
