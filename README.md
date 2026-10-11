@@ -14,19 +14,18 @@ Only `train.csv` is used: `test.csv` has no `Credit_Score` column, so it cannot 
 ├── train.csv                                  # Raw data (Kaggle)
 ├── cleaned_data.parquet                       # Output of the notebook, read by the app
 ├── app.py                                     # Streamlit entry point: page config, navigation, CSS
+├── .env                                       # GEMINI_API_KEY (git-ignored, not committed)
 ├── pages/
 │   ├── overview.py              # Headline KPIs, score distribution, column dictionary
 │   ├── univariate_analysis.py   # Distribution of every column (optionally split by score)
-│   ├── score_drivers.py         # Any variable vs credit score, with statistical tests
+│   ├── score_drivers.py         # Any variable vs credit score
 │   ├── occupation_insights.py   # Score mix, income and debt per occupation
 │   ├── analysis_questions.py    # The 6 notebook questions, recalculated for the filters
-│   └── customer_lookup.py       # One customer's 8 months and how they compare
+│   └── voice_assistant.py       # Gemini Live voice assistant (professional Egyptian Arabic) that shows KPIs and charts
 ├── utils/
-│   ├── data.py         # Loading, labels and credit-score aggregations / tests
-│   ├── charts.py       # Plotly chart builders (score colours: red / amber / green)
-│   ├── components.py   # KPI cards, cards, tables, sidebar filters
-│   └── theme.py        # Plotly template ("credit") and design tokens
-├── assets/style.css
+│   ├── components.py   # Global CSS loader + header helpers for the Voice Assistant
+│   └── voice_visuals.py # Tools Gemini calls to show KPIs and charts during the conversation
+├── assets/             # style.css, voice_widget.html, credit_score.svg (overview image)
 ├── .streamlit/config.toml
 └── requirements.txt
 ```
@@ -65,5 +64,7 @@ products and credit history age separate Poor from Good customers clearly.
 pip install -r requirements.txt
 streamlit run app.py
 ```
+
+The Voice Assistant page reads `GEMINI_API_KEY` from the `.env` file (git-ignored). Each analysis page is self-contained: it imports only pandas, plotly.express and streamlit.
 
 If `cleaned_data.parquet` is missing, run the notebook top to bottom first: its last cleaning step writes it.

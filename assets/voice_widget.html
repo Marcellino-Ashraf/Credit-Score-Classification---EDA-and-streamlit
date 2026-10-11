@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<!-- Gemini Live voice widget. Rendered by pages/voice_assistant.py, which fills
+     __WS_PORT__ and __VOICE__. Runs inside a components.html iframe, so it loads
+     its own fonts and styles. -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#FFFFFF;
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  font-family:'Inter',system-ui,'Segoe UI',sans-serif;color:#0F172A;
+}
+.wrap{
+  text-align:center;padding:32px 24px;width:100%;max-width:460px;
+  background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;
+  box-shadow:0 1px 2px rgba(15,23,42,.04),0 4px 12px rgba(15,23,42,.05);
+}
+
+/* ── Orb ── */
+.orb-ring{
+  position:relative;width:160px;height:160px;
+  margin:0 auto 24px;display:flex;align-items:center;justify-content:center;
+  border-radius:50%;background:#ECFEFF;
+}
+.orb{
+  width:120px;height:120px;border-radius:50%;
+  background:linear-gradient(135deg,#0891B2,#0E7490,#164E63);
+  box-shadow:0 8px 24px rgba(14,116,144,.35);
+  animation:idle 3s ease-in-out infinite;
+  display:flex;align-items:center;justify-content:center;
+  font-size:44px;color:#FFFFFF;transition:background .5s;
+}
+.orb.listen{
+  background:linear-gradient(135deg,#22D3EE,#0891B2);
+  box-shadow:0 8px 28px rgba(34,211,238,.45);
+  animation:listen 1.5s ease-in-out infinite;
+}
+.orb.speak{
+  background:linear-gradient(135deg,#0E7490,#0891B2,#22D3EE);
+  box-shadow:0 10px 36px rgba(14,116,144,.55);
+  animation:speak .85s ease-in-out infinite;
+}
+@keyframes idle{0%,100%{transform:scale(.96)}50%{transform:scale(1.03)}}
+@keyframes listen{0%,100%{transform:scale(.97)}50%{transform:scale(1.06)}}
+@keyframes speak{0%,100%{transform:scale(.96)}50%{transform:scale(1.12)}}
+
+h1{color:#0F172A;font-size:20px;font-weight:700;margin-bottom:4px}
+.sub{color:#64748B;font-size:13px;margin-bottom:24px}
+
+/* ── Status badge ── */
+.badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 16px;border-radius:20px;
+  background:#F8FAFC;border:1px solid #E2E8F0;
+  color:#0F172A;font-size:13px;font-weight:600;margin-bottom:24px;
+}
+.dot{width:9px;height:9px;border-radius:50%;transition:background .3s}
+.dot.idle {background:#94A3B8}
+.dot.connecting{background:#F59E0B;animation:dp 1s infinite}
+.dot.listen{background:#22D3EE;animation:dp 1.5s infinite}
+.dot.speak{background:#0E7490;animation:dp .9s infinite}
+.dot.error{background:#DC2626}
+@keyframes dp{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ── Button ── */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;padding:12px 40px;border-radius:10px;border:none;
+  font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;
+  transition:background .2s ease,box-shadow .2s ease;outline:none;color:#FFFFFF;
+}
+.btn-go{background:#0E7490;box-shadow:0 4px 12px rgba(14,116,144,.3)}
+.btn-go:hover{background:#164E63}
+.btn-stop{background:#DC2626;box-shadow:0 4px 12px rgba(220,38,38,.25)}
+.btn-stop:hover{background:#B91C1C}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+
+.err{color:#DC2626;font-size:12px;margin-top:16px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="orb-ring"><div class="orb" id="orb"><i class="fa-solid fa-microphone"></i></div></div>
+  <h1>Gemini Live Assistant</h1>
+  <p class="sub">مساعدك الصوتي الذكي لتحليل مبيعات المتجر</p>
+  <div class="badge">
+    <span class="dot idle" id="dot"></span>
+    <span id="stxt">جاهز للمحادثة</span>
+  </div><br>
+  <button class="btn btn-go" id="btn" onclick="handleBtn()"><i class="fa-solid fa-play"></i> ابدأ المحادثة</button>
+  <div class="err" id="err"></div>
+</div>
+<script>
+const WS_URL='ws://localhost:__WS_PORT__';
+const VOICE='__VOICE__';
+const OUT_RATE=24000;   // Gemini output sample rate
+const IN_RATE=16000;    // Gemini input sample rate
+
+let ws=null,audioCtx=null,micStream=null,processor=null;
+let nextPlayTime=0,isActive=false,isSpeaking=false;
+
+function ui(txt,state){
+  document.getElementById('stxt').textContent=txt;
+  document.getElementById('dot').className='dot '+state;
+  const orb=document.getElementById('orb');
+  orb.className='orb'+(state==='listen'?' listen':state==='speak'?' speak':'');
+}
+function btn(mode){
+  const b=document.getElementById('btn');
+  if(mode==='go'){b.className='btn btn-go';b.innerHTML='<i class="fa-solid fa-play"></i> ابدأ المحادثة';b.disabled=false;b.onclick=handleBtn}
+  else if(mode==='stop'){b.className='btn btn-stop';b.innerHTML='<i class="fa-solid fa-stop"></i> إنهاء المحادثة';b.disabled=false;b.onclick=stop}
+  else{b.className='btn btn-go';b.innerHTML='<i class="fa-solid fa-spinner fa-spin"></i> جاري الاتصال...';b.disabled=true}
+}
+function showErr(m){const e=document.getElementById('err');e.textContent=m;e.style.display='block';setTimeout(()=>e.style.display='none',7000)}
+
+function handleBtn(){if(!isActive)start()}
+
+async function start(){
+  btn('loading');
+  ui('بيطلب إذن المايكروفون...','connecting');
+  try{
+    micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}});
+  }catch(e){
+    showErr('لازم تسمح للمتصفح يوصل للمايكروفون!');
+    ui('تعذّر الوصول للمايكروفون','error');btn('go');return;
+  }
+  audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  nextPlayTime=audioCtx.currentTime;
+  ui('بيتصل بـ Gemini Live...','connecting');
+  ws=new WebSocket(WS_URL);
+  ws.binaryType='arraybuffer';
+  ws.onopen=()=>ws.send(JSON.stringify({type:'config',voice:VOICE}));
+  ws.onmessage=(ev)=>{
+    if(typeof ev.data==='string'){
+      const m=JSON.parse(ev.data);
+      if(m.type==='ready'){isActive=true;btn('stop');startMic();ui('تفضل حضرتك بالسؤال... أنا سامعك','listen')}
+      else if(m.type==='turn_complete'){isSpeaking=false;ui('تفضل حضرتك بالسؤال... أنا سامعك','listen')}
+      else if(m.type==='error'){showErr(m.message||'حصل خطأ');stop()}
+    }else{
+      if(!isSpeaking){isSpeaking=true;ui('المساعد بيتكلم...','speak')}
+      playPCM(new Int16Array(ev.data));
+    }
+  };
+  ws.onclose=()=>{if(isActive){ui('انقطع الاتصال','idle');cleanup()}  };
+  ws.onerror=()=>{showErr('فشل الاتصال بالسيرفر');stop()};
+}
+
+function startMic(){
+  if(!audioCtx||!micStream)return;
+  const ctxRate=audioCtx.sampleRate;
+  const ratio=ctxRate/IN_RATE;
+  const micSrc=audioCtx.createMediaStreamSource(micStream);
+  processor=audioCtx.createScriptProcessor(2048,1,1);
+  processor.onaudioprocess=(e)=>{
+    if(!ws||ws.readyState!==1)return;
+    const f32=e.inputBuffer.getChannelData(0);
+    const len=Math.floor(f32.length/ratio);
+    const out=new Int16Array(len);
+    for(let i=0;i<len;i++){
+      const s=f32[Math.floor(i*ratio)];
+      out[i]=Math.max(-32768,Math.min(32767,s*32767));
+    }
+    ws.send(out.buffer);
+  };
+  micSrc.connect(processor);
+  processor.connect(audioCtx.destination);
+}
+
+function playPCM(i16){
+  if(!audioCtx||i16.length===0)return;
+  const ctxRate=audioCtx.sampleRate;
+  const ratio=ctxRate/OUT_RATE;
+  const outLen=Math.ceil(i16.length*ratio);
+  const f32=new Float32Array(outLen);
+  for(let i=0;i<outLen;i++){
+    const pos=i/ratio;
+    const fl=Math.floor(pos);
+    const fr=pos-fl;
+    const s0=(i16[fl]||0)/32768;
+    const s1=(i16[Math.min(fl+1,i16.length-1)]||0)/32768;
+    f32[i]=s0*(1-fr)+s1*fr;
+  }
+  const buf=audioCtx.createBuffer(1,f32.length,ctxRate);
+  buf.copyToChannel(f32,0);
+  const src=audioCtx.createBufferSource();
+  src.buffer=buf;src.connect(audioCtx.destination);
+  const now=audioCtx.currentTime;
+  const at=Math.max(now,nextPlayTime);
+  src.start(at);
+  nextPlayTime=at+buf.duration;
+}
+
+function stop(){cleanup();ui('انتهت المحادثة','idle');btn('go')}
+function cleanup(){
+  isActive=false;isSpeaking=false;
+  if(processor){processor.disconnect();processor=null}
+  if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null}
+  if(ws&&ws.readyState<2){ws.close()}
+  ws=null;
+  if(audioCtx){audioCtx.close();audioCtx=null}
+}
+</script>
+</body>
+</html>

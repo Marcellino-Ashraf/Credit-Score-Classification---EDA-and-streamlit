@@ -1,74 +1,133 @@
+import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-from utils import charts, theme
-from utils.components import card, chart_card, data_table, empty_state, fmt_pct, insight_callout, page_header, \
-    section_header, sidebar_filters
-from utils.data import categorical_columns, chi_square_p, describe_p, kind_of, kruskal_p, label, load_cleaned, \
-    median_by_score, numeric_columns, score_mix
+# ── Settings ──────────────────────────────────────────────
+SCORE_ORDER = ["Poor", "Standard", "Good"]
+SCORE_COLORS = {"Poor": "#DC2626", "Standard": "#F59E0B", "Good": "#16A34A"}
+MONTH_ORDER = ["January", "February", "March", "April", "May", "June", "July", "August"]
+SKIP_COLUMNS = ["ID", "Customer_ID", "Type_of_Loan", "Credit_History_Age", "Credit_Score"]  # ids, free text, target
 
+px.defaults.template = "plotly_white"
+
+
+
+def load_data() -> pd.DataFrame:
+    return pd.read_parquet("cleaned_data.parquet")
+
+
+def label(column: str) -> str:
+    """Human-readable column name."""
+    return column.replace("_", " ").capitalize()
+
+
+# ── Small layout helpers (styles live in assets/style.css) ──
+def page_header(title: str, subtitle: str, icon: str) -> None:
+    st.html(f'<div class="page-header"><div class="page-header__icon"><i class="fa-solid fa-{icon}"></i></div>'
+            f'<div><h1 class="page-header__title">{title}</h1><p class="page-header__subtitle">{subtitle}</p></div></div>')
+
+
+def section_header(title: str, icon: str, caption: str) -> None:
+    st.html(f'<div class="section-header"><h2><i class="fa-solid fa-{icon}"></i><span>{title}</span></h2>'
+            f'<p class="section-header__caption">{caption}</p></div>')
+
+
+def chart_card(fig, title: str, icon: str, caption: str, key: str) -> None:
+    fig.update_layout(title_text="", legend_title_text="")
+    with st.container(key=f"card-{key}"):
+        st.html(f'<div class="card__title"><i class="fa-solid fa-{icon}"></i><span>{title}</span></div>')
+        st.plotly_chart(fig, width="stretch", theme=None, config={"displayModeBar": False}, key=f"chart-{key}")
+        st.html(f'<p class="card__caption">{caption}</p>')
+
+
+def sidebar_filters(df: pd.DataFrame, key: str) -> pd.DataFrame:
+    """Occupation, month and age filters; empty selections mean 'all'."""
+    with st.sidebar:
+        st.html('<div class="sidebar-label">Filters</div>')
+        occupations = st.multiselect("Occupation", sorted(df["Occupation"].unique()), placeholder="All occupations",
+                                     key=f"{key}_occ")
+        months = st.multiselect("Month", MONTH_ORDER, placeholder="All months", key=f"{key}_months")
+        ages = st.slider("Age", int(df["Age"].min()), int(df["Age"].max()), (int(df["Age"].min()), int(df["Age"].max())),
+                         key=f"{key}_age")
+    if occupations:
+        df = df[df["Occupation"].isin(occupations)]
+    if months:
+        df = df[df["Month"].isin(months)]
+    return df[(df["Age"] >= ages[0]) & (df["Age"] <= ages[1])]
+
+
+# ── Credit score helpers ──────────────────────────────────
+def score_share(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """% of Poor / Standard / Good inside every category of ``column`` (one row per category and score)."""
+    share = df.groupby([column, "Credit_Score"]).size().reset_index(name="rows")
+    share["Percentage"] = share["rows"] / share.groupby(column)["rows"].transform("sum") * 100
+    return share
+
+
+def stacked_bar(share: pd.DataFrame, column: str, category_title: str):
+    """Horizontal 100% stacked bars, one colour per credit score, sorted by % Poor."""
+    poor = share[share["Credit_Score"] == "Poor"].sort_values("Percentage", ascending=False)
+    fig = px.bar(share, x="Percentage", y=column, color="Credit_Score", orientation="h", text_auto=".0f",
+                 color_discrete_map=SCORE_COLORS, labels={"Percentage": "Share of rows (%)", column: category_title},
+                 category_orders={"Credit_Score": SCORE_ORDER, column: poor[column].tolist()})
+    fig.update_layout(height=max(260, 80 + 30 * share[column].nunique()), xaxis_range=[0, 100])
+    return fig
+
+
+# ── Page ──────────────────────────────────────────────────
 page_header("Credit Score Drivers", "How each variable differs between Poor, Standard and Good credit scores.",
             "magnifying-glass-chart")
 
-df = sidebar_filters(load_cleaned(), key="drv")
+df = sidebar_filters(load_data(), key="drv")
 if df.empty:
-    empty_state()
+    st.html('<div class="empty"><i class="fa-solid fa-filter-circle-xmark"></i>'
+            '<p class="empty__msg">No data matches the current filters.</p></div>')
     st.stop()
 
-num_cols = numeric_columns(df)
+num_cols = df.select_dtypes(include="number").columns.tolist()
+cat_cols = df.columns.drop(num_cols + SKIP_COLUMNS).tolist()
+medians = df.groupby("Credit_Score")[num_cols].agg("median").reindex(SCORE_ORDER)
 
 # ── Numeric driver ────────────────────────────────────────
 section_header("Numeric variable vs credit score", "chart-column",
-               "Pick a variable: the box plot compares its spread in each score group.")
+               "Pick a variable: compare its typical value and its spread in each score group.")
 col = st.selectbox("Numeric variable", num_cols, format_func=label, key="drv_num",
                    index=num_cols.index("Outstanding_Debt"))
 
-medians = median_by_score(df, [col])[col]
 c1, c2 = st.columns(2, gap="medium")
 with c1:
-    chart_card(charts.box_by_score(df, col, label(col), kind_of(col)), f"{label(col)} by credit score",
-               icon="chart-simple", key="drv-box",
-               caption=f"Kruskal-Wallis test: {describe_p(kruskal_p(df, col))}.")
+    plot_df = medians[col].rename_axis("Credit_Score").reset_index()
+    fig = px.bar(plot_df, x="Credit_Score", y=col, color="Credit_Score", text_auto=",.1f",
+                 color_discrete_map=SCORE_COLORS, labels={col: f"Median {label(col).lower()}", "Credit_Score": "Credit score"})
+    fig.update_layout(height=360, showlegend=False)
+    chart_card(fig, f"Median {label(col).lower()} by credit score", "chart-simple",
+               "", "drv-median")
 with c2:
-    chart_card(charts.histogram_by_score(df, col, label(col)), f"{label(col)} distribution per score",
-               icon="chart-area", key="drv-hist",
-               caption="Each score group is scaled to 100% so the shapes are comparable.")
+    group = st.radio("Score group", SCORE_ORDER, horizontal=True, key="drv_group")
+    fig = px.histogram(df[df["Credit_Score"] == group], x=col, labels={col: label(col)},
+                       color_discrete_sequence=[SCORE_COLORS[group]])
+    fig.update_layout(height=360, bargap=0.02, yaxis_title="Rows (count)")
+    chart_card(fig, f"{label(col)} distribution: {group} scores", "chart-area",
+               "", "drv-hist")
 
 # ── Categorical driver ────────────────────────────────────
 section_header("Categorical variable vs credit score", "layer-group",
                "Share of each credit score inside every category (each bar sums to 100%).")
-cat = st.selectbox("Categorical variable", categorical_columns(df), format_func=label, key="drv_cat",
-                   index=categorical_columns(df).index("Credit_Mix"))
-mix = score_mix(df, cat)
-if cat != "Month":
-    mix = mix.sort_values("Poor", ascending=False)
-chart_card(charts.score_stacked_bar(mix, label(cat)), f"Credit score mix by {label(cat).lower()}",
-           icon="bars-progress", key="drv-mix",
-           caption=f"Sorted by % Poor. Chi-square test: {describe_p(chi_square_p(df, cat))}.")
-
-# ── Correlations ──────────────────────────────────────────
-section_header("Correlation between numeric variables", "table-cells",
-               "Pearson correlation: +1 move together, -1 move in opposite directions, 0 unrelated.")
-corr = df[num_cols].corr().round(2)
-corr.index = corr.columns = [label(c) for c in num_cols]
-chart_card(charts.heatmap(corr, "", "", "Correlation", zmin=-1, zmax=1, colorscale=theme.DIVERGING,
-                          fmt=".2f", suffix=""),
-           "Correlation matrix", icon="table-cells", key="drv-corr")
+cat = st.selectbox("Categorical variable", cat_cols, format_func=label, key="drv_cat",
+                   index=cat_cols.index("Credit_Mix"))
+share = score_share(df, cat)
+poor = share[share["Credit_Score"] == "Poor"].sort_values("Percentage", ascending=False)
+chart_card(stacked_bar(share, cat, label(cat)), f"Credit score mix by {label(cat).lower()}", "bars-progress",
+           "Sorted by % Poor (highest first).", "drv-mix")
 
 # ── Medians table ─────────────────────────────────────────
-with card("Median of every numeric variable per credit score", icon="table", key="drv-medians",
-          caption="Variables sorted by how much the Poor median differs from the Good median."):
-    table = median_by_score(df, num_cols).T
-    good = table["Good"].abs().where(table["Good"] != 0)  # a zero median has no meaningful % change
-    table["Poor vs Good"] = (table["Poor"] - table["Good"]) / good * 100
-    table = table.sort_values("Poor vs Good", key=abs, ascending=False)
-    table.insert(0, "Variable", [label(c) for c in table.index])
-    data_table(table.round(2), formats={"Poor": "number", "Standard": "number", "Good": "number",
-                                        "Poor vs Good": "percent"})
+section_header("Median of every numeric variable per credit score", "table",
+               "Poor vs Good = how much higher (+) or lower (-) the Poor median is than the Good median.")
+rows = []
+for c in num_cols:
+    poor_median, good_median = medians.loc["Poor", c], medians.loc["Good", c]
+    rows.append({"Variable": label(c), "Poor": poor_median, "Standard": medians.loc["Standard", c], "Good": good_median,
+                 "Poor vs Good (%)": (poor_median - good_median) / good_median * 100 if good_median else None})
+with st.container(key="card-drv-medians"):
+    st.dataframe(pd.DataFrame(rows).round(2), hide_index=True, width="stretch")
 
-worst = mix["Poor"].idxmax()
-insight_callout([
-    f"Median {label(col).lower()}: Poor {medians['Poor']:,.2f}, Standard {medians['Standard']:,.2f}, "
-    f"Good {medians['Good']:,.2f}.",
-    f"Within {label(cat).lower()}, '{worst}' has the highest Poor share ({fmt_pct(mix.loc[worst, 'Poor'])}).",
-    f"The variable that separates Poor from Good the most (by median) is {table.iloc[0]['Variable'].lower()}.",
-])
