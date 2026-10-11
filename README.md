@@ -5,7 +5,23 @@ Exploratory data analysis and a multi-page Streamlit dashboard built on the
 The data holds the banking and credit profile of 12,500 customers, one record per customer per month
 (January to August), and the credit score the bank gave them: **Poor**, **Standard** or **Good**.
 
-Only `train.csv` is used: `test.csv` has no `Credit_Score` column, so it cannot answer questions about the score.
+## About the two data files
+
+The dataset was published for a **machine learning** task (predicting a customer's credit score), so Kaggle
+splits it into two files:
+
+| File | Rows | Months | `Credit_Score` column |
+|---|---|---|---|
+| `train.csv` | 100,000 | January – August | Yes (the target) |
+| `test.csv` | 50,000 | September – December | No (a model would predict it) |
+
+Both files describe the **same 12,500 customers**; `test.csv` just continues their history for the last four
+months of the year, without the answer.
+
+**This project is an exploratory data analysis, so only `train.csv` is used:** every question here is about
+how the credit score relates to the other columns, and `test.csv` has no credit score to analyse.
+`test.csv` is kept in the repository for a future machine learning phase, where a model trained on the cleaned
+`train.csv` would predict the scores for September – December.
 
 ## Project Structure
 
