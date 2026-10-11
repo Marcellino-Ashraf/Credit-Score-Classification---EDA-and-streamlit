@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- Gemini Live voice widget. Rendered by pages/voice_assistant.py, which fills
-     __WS_PORT__ and __VOICE__. Runs inside a components.html iframe, so it loads
+     __VOICE__ and __SESSION__. Runs inside a components.html iframe, so it loads
      its own fonts and styles. -->
 <html lang="ar" dir="rtl">
 <head>
@@ -94,7 +94,12 @@ h1{color:#0F172A;font-size:20px;font-weight:700;margin-bottom:4px}
   <div class="err" id="err"></div>
 </div>
 <script>
-const WS_URL='ws://localhost:__WS_PORT__';
+// The bridge is a route on the Streamlit server itself (/voice-ws), so build its address from the page URL.
+// Works locally (ws://localhost:8501/voice-ws) and on Streamlit Cloud (wss://<app>.streamlit.app/.../voice-ws).
+const PAGE=(()=>{try{return window.parent.location}catch(e){return window.location}})();
+const BASE_PATH=PAGE.pathname.replace(/\/[^\/]*$/,'');  // drop the page name, e.g. /voice_assistant
+const WS_URL=(PAGE.protocol==='https:'?'wss://':'ws://')+PAGE.host+BASE_PATH+'/voice-ws';
+const SESSION='__SESSION__';
 const VOICE='__VOICE__';
 const OUT_RATE=24000;   // Gemini output sample rate
 const IN_RATE=16000;    // Gemini input sample rate
@@ -132,7 +137,7 @@ async function start(){
   ui('بيتصل بـ Gemini Live...','connecting');
   ws=new WebSocket(WS_URL);
   ws.binaryType='arraybuffer';
-  ws.onopen=()=>ws.send(JSON.stringify({type:'config',voice:VOICE}));
+  ws.onopen=()=>ws.send(JSON.stringify({type:'config',voice:VOICE,session:SESSION}));
   ws.onmessage=(ev)=>{
     if(typeof ev.data==='string'){
       const m=JSON.parse(ev.data);

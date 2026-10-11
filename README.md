@@ -13,7 +13,8 @@ Only `train.csv` is used: `test.csv` has no `Credit_Score` column, so it cannot 
 ├── Credit Score Classification - EDA.ipynb   # Cleaning, univariate, bivariate analysis and 6 questions
 ├── train.csv                                  # Raw data (Kaggle)
 ├── cleaned_data.parquet                       # Output of the notebook, read by the app
-├── app.py                                     # Streamlit entry point: page config, navigation, CSS
+├── app.py                                     # Entry point (st.App): runs dashboard.py + the /voice-ws voice route
+├── dashboard.py                               # Page config, navigation, CSS
 ├── .env                                       # GEMINI_API_KEY (git-ignored, not committed)
 ├── pages/
 │   ├── overview.py              # Headline KPIs, score distribution, column dictionary
@@ -24,6 +25,7 @@ Only `train.csv` is used: `test.csv` has no `Credit_Score` column, so it cannot 
 │   └── voice_assistant.py       # Gemini Live voice assistant (professional Egyptian Arabic) that shows KPIs and charts
 ├── utils/
 │   ├── components.py   # Global CSS loader + header helpers for the Voice Assistant
+│   ├── voice_bridge.py  # Gemini Live audio bridge, served at /voice-ws on the app's own address
 │   └── voice_visuals.py # Tools Gemini calls to show KPIs and charts during the conversation
 ├── assets/             # style.css, voice_widget.html, credit_score.svg (overview image)
 ├── .streamlit/config.toml
@@ -65,6 +67,6 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The Voice Assistant page reads `GEMINI_API_KEY` from the `.env` file (git-ignored). Each analysis page is self-contained: it imports only pandas, plotly.express and streamlit.
+The Voice Assistant reads `GEMINI_API_KEY` from `.env` locally (git-ignored) or from the app's Secrets on Streamlit Cloud. Its audio bridge runs on the app's own address (`/voice-ws`), so it also works when deployed. Each analysis page is self-contained: it imports only pandas, plotly.express and streamlit.
 
 If `cleaned_data.parquet` is missing, run the notebook top to bottom first: its last cleaning step writes it.

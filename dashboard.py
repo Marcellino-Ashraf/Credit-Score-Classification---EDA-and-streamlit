@@ -1,6 +1,6 @@
-"""Entry point: page config, global styling and navigation.
+"""The Streamlit app: page config, global styling and navigation.
 
-Run with:  conda run -n ML streamlit run app.py
+Started by app.py (st.App), which also serves the voice assistant's WebSocket route.
 """
 
 import streamlit as st

@@ -8,7 +8,7 @@ How it works:
   3. The page polls ``latest_visual()`` every couple of seconds and draws the newest visual.
 
 This module is imported (not re-executed on every Streamlit rerun), so ``_store`` is shared between
-the bridge thread and the page. It is one store per server: fine for a local, single-user app.
+the bridge and the page. Visuals are stored per browser session id, so visitors never see each other's charts.
 """
 
 from __future__ import annotations
@@ -100,21 +100,22 @@ TOOLS = [types.Tool(function_declarations=[
 ])]
 
 
-# ── Shared store between the bridge thread and the page ───
+# ── Shared store between the bridge and the page: one latest visual per browser session ──
 _lock = threading.Lock()
-_store: dict = {"id": 0, "visual": None}
+_counter = {"id": 0}
+_store: dict[str, dict] = {}
 
 
-def latest_visual() -> dict | None:
+def latest_visual(session_id: str) -> dict | None:
     with _lock:
-        return _store["visual"]
+        return _store.get(session_id)
 
 
-def _publish(visual: dict) -> None:
+def _publish(session_id: str, visual: dict) -> None:
     with _lock:
-        _store["id"] += 1
-        visual["id"] = _store["id"]
-        _store["visual"] = visual
+        _counter["id"] += 1
+        visual["id"] = _counter["id"]
+        _store[session_id] = visual
 
 
 # ── Tool implementations ──────────────────────────────────
@@ -206,8 +207,8 @@ _HANDLERS = {
 }
 
 
-def run_tool(name: str, args: dict, df: pd.DataFrame) -> dict:
-    """Run one tool call: publish the visual for the page and return the numbers for Gemini."""
+def run_tool(name: str, args: dict, df: pd.DataFrame, session_id: str = "") -> dict:
+    """Run one tool call: publish the visual for that page session and return the numbers for Gemini."""
     try:
         occupation = args.get("occupation")
         scope = "all customers"
@@ -217,7 +218,7 @@ def run_tool(name: str, args: dict, df: pd.DataFrame) -> dict:
         if df.empty:
             return {"error": "No data for this selection."}
         visual, result = _HANDLERS[name](df, args, scope)
-        _publish(visual)
+        _publish(session_id, visual)
         result["note"] = "The chart and KPI cards are now shown on the page under the assistant."
         return result
     except Exception as e:  # never break the voice session because of a chart
